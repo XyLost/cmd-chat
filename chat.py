@@ -39,7 +39,7 @@ def enable_win_colors():
 # ── State ─────────────────────────────────────────────────────────
 state = {
     "username": "",
-    "room": "general",
+    "room": "",
     "last_id": 0,
     "running": True,
     "in_input": False,
@@ -53,9 +53,8 @@ def clear():
 
 
 def print_msg(text):
-    """Print a message, redrawing the input prompt if needed."""
     print(f"\r{' ' * 70}\r{text}")
-    if state["in_input"]:
+    if state["in_input"] and state["room"]:
         prompt = (f"  {ROOM_COLOR}#{state['room']}{RESET} "
                   f"{MY_COLOR}{BOLD}{state['username']}{RESET} > ")
         print(prompt, end="", flush=True)
@@ -64,33 +63,63 @@ def print_msg(text):
 def print_header():
     print(f"{CYAN}{'=' * 50}{RESET}")
     print(f"  {BOLD}[CMD Chat]{RESET}")
-    print(f"  User: {MY_COLOR}{BOLD}{state['username']}{RESET}   "
-          f"Room: {ROOM_COLOR}{BOLD}#{state['room']}{RESET}")
-    print(f"{CYAN}{'=' * 50}{RESET}")
-    print(f"  {SYS_COLOR}Type /help for commands{RESET}\n")
+    print(f"  User : {MY_COLOR}{BOLD}{state['username']}{RESET}")
+    print(f"  Room : {ROOM_COLOR}{BOLD}#{state['room']}{RESET}")
+    print(f"{CYAN}{'=' * 50}{RESET}\n")
+
+
+def api_get(path, params=None):
+    """GET helper — returns parsed JSON or None on error."""
+    try:
+        r = requests.get(f"{WORKER_URL}{path}", params=params, timeout=6)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        print_msg(f"  {ERROR_COLOR}Network error: {e}{RESET}")
+    return None
+
+
+def api_post(path, body):
+    """POST helper — returns True on success."""
+    try:
+        r = requests.post(f"{WORKER_URL}{path}", json=body, timeout=6)
+        return r.status_code == 200
+    except Exception as e:
+        print_msg(f"  {ERROR_COLOR}Network error: {e}{RESET}")
+    return False
+
+# ── Announce join / leave ─────────────────────────────────────────
+
+
+def announce(action):
+    """action: 'joined' or 'left'"""
+    api_post("/send", {
+        "room": state["room"],
+        "user": "__system__",
+        "text": f"{state['username']} {action} the room.",
+    })
 
 # ── Poll thread ───────────────────────────────────────────────────
 
 
 def poll_thread():
     while state["running"]:
-        try:
-            r = requests.get(
-                f"{WORKER_URL}/poll",
-                params={"room": state["room"], "since": state["last_id"]},
-                timeout=5,
-            )
-            if r.status_code == 200:
-                for msg in r.json():
+        if state["room"]:
+            data = api_get(
+                "/poll", {"room": state["room"], "since": state["last_id"]})
+            if data:
+                for msg in data:
                     uid = msg["user"]
                     txt = msg["text"]
                     ts = time.strftime(
                         "%H:%M", time.localtime(msg["id"] / 1000))
 
-                    if uid == state["username"]:
+                    if uid == "__system__":
+                        line = f"  {SYS_COLOR}[{ts}] * {txt}{RESET}"
+                    elif uid == state["username"]:
                         line = (f"  {TIME_COLOR}[{ts}]{RESET} "
                                 f"{MY_COLOR}{BOLD}You{RESET} "
-                                f"{MY_COLOR}< {txt}{RESET}")
+                                f"{MY_COLOR}> {txt}{RESET}")
                     else:
                         c = get_color(uid)
                         line = (f"  {TIME_COLOR}[{ts}]{RESET} "
@@ -99,65 +128,72 @@ def poll_thread():
 
                     print_msg(line)
                     state["last_id"] = max(state["last_id"], msg["id"])
-        except Exception:
-            pass
         time.sleep(2)
+
+# ── Load room history ─────────────────────────────────────────────
+
+
+def load_history(room_name):
+    msgs = api_get("/poll", {"room": room_name, "since": 0})
+    if not msgs:
+        print(f"  {SYS_COLOR}Room is empty. Say hello!{RESET}\n")
+        return
+
+    print(f"  {SYS_COLOR}--- Last {min(20, len(msgs))} messages ---{RESET}")
+    for msg in msgs[-20:]:
+        uid = msg["user"]
+        txt = msg["text"]
+        ts = time.strftime("%H:%M", time.localtime(msg["id"] / 1000))
+        if uid == "__system__":
+            print(f"  {SYS_COLOR}[{ts}] * {txt}{RESET}")
+        elif uid == state["username"]:
+            print(
+                f"  {TIME_COLOR}[{ts}]{RESET} {MY_COLOR}{BOLD}You{RESET} {MY_COLOR}> {txt}{RESET}")
+        else:
+            c = get_color(uid)
+            print(
+                f"  {TIME_COLOR}[{ts}]{RESET} {c}{BOLD}{uid}{RESET} {c}> {txt}{RESET}")
+
+    state["last_id"] = max(m["id"] for m in msgs)
+    print(f"  {SYS_COLOR}--- End of history ---{RESET}\n")
 
 # ── Join room ─────────────────────────────────────────────────────
 
 
-def join_room(room_name):
+def join_room(room_name, first=False):
     room_name = room_name.strip().lower()
     if not room_name:
         print(f"  {ERROR_COLOR}Room name cannot be empty.{RESET}\n")
         return
 
+    # announce leave from old room
+    if state["room"] and not first:
+        announce("left")
+
     state["room"] = room_name
     state["last_id"] = 0
 
-    try:
-        r = requests.get(f"{WORKER_URL}/poll",
-                         params={"room": room_name, "since": 0}, timeout=5)
-        msgs = r.json() if r.status_code == 200 else []
-    except Exception as e:
-        msgs = []
-        print(f"  {ERROR_COLOR}Could not load history: {e}{RESET}\n")
-
     clear()
     print_header()
-    print(f"  {SYS_COLOR}Joined room {ROOM_COLOR}#{room_name}{RESET}\n")
 
-    if msgs:
-        print(f"  {SYS_COLOR}--- Last {min(20, len(msgs))} messages ---{RESET}")
-        for msg in msgs[-20:]:
-            uid = msg["user"]
-            txt = msg["text"]
-            ts = time.strftime("%H:%M", time.localtime(msg["id"] / 1000))
-            if uid == state["username"]:
-                print(
-                    f"  {TIME_COLOR}[{ts}]{RESET} {MY_COLOR}{BOLD}You{RESET} {MY_COLOR}< {txt}{RESET}")
-            else:
-                c = get_color(uid)
-                print(
-                    f"  {TIME_COLOR}[{ts}]{RESET} {c}{BOLD}{uid}{RESET} {c}> {txt}{RESET}")
-        state["last_id"] = max(m["id"] for m in msgs)
-        print(f"  {SYS_COLOR}--- End of history ---{RESET}\n")
-    else:
-        print(f"  {SYS_COLOR}Room is empty. Say hello!{RESET}\n")
+    # announce join
+    announce("joined")
+
+    load_history(room_name)
 
 # ── Commands ──────────────────────────────────────────────────────
 
 
 def show_rooms():
-    try:
-        rooms = requests.get(f"{WORKER_URL}/rooms", timeout=5).json()
-        print(f"\n  {SYS_COLOR}Active rooms:{RESET}")
-        for rm in (rooms if rooms else ["(none yet)"]):
-            marker = " <-- you are here" if rm == state["room"] else ""
+    data = api_get("/rooms")
+    print(f"\n  {SYS_COLOR}Active rooms:{RESET}")
+    if data:
+        for rm in data:
+            marker = f"  {SYS_COLOR}<-- you are here{RESET}" if rm == state["room"] else ""
             print(f"    {ROOM_COLOR}#{rm}{RESET}{marker}")
-        print()
-    except Exception:
-        print(f"  {ERROR_COLOR}Could not fetch room list.{RESET}\n")
+    else:
+        print(f"    {SYS_COLOR}(none yet){RESET}")
+    print()
 
 
 def show_help():
@@ -171,50 +207,65 @@ def show_help():
   =============================={RESET}
 """)
 
+# ── Setup screen (username + room, then help) ─────────────────────
 
-def send(text):
-    try:
-        requests.post(
-            f"{WORKER_URL}/send",
-            json={"room": state["room"],
-                  "user": state["username"], "text": text},
-            timeout=5,
-        )
-    except Exception as e:
-        print(f"  {ERROR_COLOR}Send error: {e}{RESET}\n")
+
+def setup():
+    clear()
+    print(f"{CYAN}{'=' * 50}{RESET}")
+    print(f"  {BOLD}[CMD Chat]{RESET}")
+    print(f"{CYAN}{'=' * 50}{RESET}\n")
+
+    # username
+    while True:
+        username = input("  Enter username: ").strip()
+        if username:
+            break
+        print(f"  {ERROR_COLOR}Username cannot be empty.{RESET}")
+    state["username"] = username
+
+    # room
+    print()
+    while True:
+        room = input("  Enter room name: ").strip().lower()
+        if room:
+            break
+        print(f"  {ERROR_COLOR}Room name cannot be empty.{RESET}")
+
+    clear()
+
+    # show help before entering room
+    print(f"{CYAN}{'=' * 50}{RESET}")
+    print(
+        f"  {BOLD}[CMD Chat]  Welcome, {MY_COLOR}{username}{RESET}{BOLD}!{RESET}")
+    print(f"{CYAN}{'=' * 50}{RESET}")
+    print(f"""
+  {SYS_COLOR}========== Commands ==========
+  /rooms         List active rooms
+  /join NAME     Switch to room NAME
+  /clear         Clear current room messages
+  /help          Show this help
+  exit           Quit
+  =============================={RESET}
+""")
+    input(
+        f"  {SYS_COLOR}Press Enter to join {ROOM_COLOR}#{room}{SYS_COLOR}...{RESET}")
+
+    return room
 
 # ── Main ──────────────────────────────────────────────────────────
 
 
 def main():
     enable_win_colors()
-    clear()
 
-    print(f"{CYAN}{'=' * 50}{RESET}")
-    print(f"  {BOLD}[CMD Chat]{RESET}")
-    print(f"{CYAN}{'=' * 50}{RESET}\n")
+    room = setup()
 
-    # --- get username ---
-    while True:
-        username = input("  Username: ").strip()
-        if username:
-            break
-        print(f"  {ERROR_COLOR}Username cannot be empty.{RESET}")
-    state["username"] = username
-
-    # --- get room ---
-    print(f"\n  {SYS_COLOR}Default room: {ROOM_COLOR}#general{RESET}")
-    ri = input("  Room name (Enter for general): ").strip().lower()
-    if ri:
-        state["room"] = ri
-
-    # --- start polling thread ---
+    # start poll thread before join so we don't miss messages
     threading.Thread(target=poll_thread, daemon=True).start()
 
-    # --- load room history ---
-    join_room(state["room"])
+    join_room(room, first=True)
 
-    # --- main loop ---
     while state["running"]:
         try:
             prompt = (f"  {ROOM_COLOR}#{state['room']}{RESET} "
@@ -224,6 +275,8 @@ def main():
             state["in_input"] = False
         except (KeyboardInterrupt, EOFError):
             state["running"] = False
+            if state["room"]:
+                announce("left")
             print(f"\n  {SYS_COLOR}Goodbye! o/{RESET}")
             break
 
@@ -232,6 +285,7 @@ def main():
 
         if text == "exit":
             state["running"] = False
+            announce("left")
             print(f"  {SYS_COLOR}Goodbye! o/{RESET}")
 
         elif text == "/help":
@@ -244,19 +298,22 @@ def main():
             join_room(text[6:])
 
         elif text == "/clear":
-            try:
-                requests.post(f"{WORKER_URL}/clear",
-                              json={"room": state["room"]}, timeout=5)
+            if api_post("/clear", {"room": state["room"]}):
                 state["last_id"] = 0
                 print(f"  {SYS_COLOR}Room cleared.{RESET}\n")
-            except Exception:
+            else:
                 print(f"  {ERROR_COLOR}Clear failed.{RESET}\n")
 
         elif text.startswith("/"):
             print(f"  {ERROR_COLOR}Unknown command. Type /help.{RESET}\n")
 
         else:
-            send(text)
+            if not api_post("/send", {
+                "room": state["room"],
+                "user": state["username"],
+                "text": text,
+            }):
+                print(f"  {ERROR_COLOR}Failed to send message.{RESET}\n")
 
 
 if __name__ == "__main__":
