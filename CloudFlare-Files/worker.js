@@ -13,8 +13,7 @@
 //    ✅ System join/leave messages
 // ═══════════════════════════════════════════════════════════════
 
-const MASTER_ADMIN_PASSWORD_HASH = "382997923e031c6ef0ef957f555504485b415b7bcb4136318e3b9d0a515e2638";
-// const MASTER_ADMIN_PASSWORD_HASH = "REPLACE_WITH_SHA256_OF_YOUR_ADMIN_PASSWORD";
+const MASTER_ADMIN_PASSWORD_HASH = "REPLACE_WITH_SHA256_OF_YOUR_ADMIN_PASSWORD";
 // To generate: sha256("yourpassword") → paste the hex here
 // Online tool: https://emn178.github.io/online-tools/sha256.html
 

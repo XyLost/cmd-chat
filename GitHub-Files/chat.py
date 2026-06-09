@@ -288,26 +288,61 @@ def show_rooms():
 
 def show_help():
     in_room = state["room"] != ""
-    admin_cmds = """
-  /admin clear <room>   Clear room messages
-  /admin delete <room>  Delete a room permanently
-  /admin deleteall      Delete ALL rooms""" if state["is_admin"] else ""
+    W = 44  # box width
 
-    room_cmds = """
-  /join <name>          Join a room (asks for password if needed)
-  /create <name>        Create a new room
-  /rooms                List all active rooms
-  /leave                Leave current room""" if in_room else """
-  /join <name>          Join a room
-  /create <name>        Create a new room
-  /rooms                List all rooms"""
+    def row(cmd, desc, color=SYS_COLOR):
+        line = f"  {cmd:<22}{desc}"
+        return f"  {color}{line}{RESET}"
 
-    print(f"""
-  {SYS_COLOR}════════════ Commands ════════════{room_cmds}{admin_cmds}
-  /help                 Show this help
-  exit                  Quit
-  ══════════════════════════════════{RESET}
-""")
+    def sep(title=""):
+        if title:
+            pad = (W - len(title) - 2) // 2
+            return f"  {SYS_COLOR}{'═' * pad} {title} {'═' * (W - pad - len(title) - 2)}{RESET}"
+        return f"  {SYS_COLOR}{'═' * W}{RESET}"
+
+    lines = [
+        "",
+        sep("📋 General"),
+        row("/help",           "Show this help message"),
+        row("/rooms",          "List all rooms  (🔒=password  🔓=open)"),
+        row("/join <name>",    "Join a room — asks password if locked"),
+        row("/create <name>",  "Create a new room (set optional password)"),
+    ]
+
+    if in_room:
+        lines += [
+            row("/leave",          "Leave current room"),
+            row("<message>",
+                f"Send a message  (max {MAX_MSG_LEN} chars)"),
+        ]
+    else:
+        lines += [
+            row("─ (join a room)", "to start chatting", TIME_COLOR),
+        ]
+
+    lines += [
+        row("exit",            "Quit CMD Chat"),
+        sep(),
+    ]
+
+    if state["is_admin"]:
+        lines += [
+            "",
+            sep(f"👑 Admin Commands"),
+            row("/admin",                  "Show admin status"),
+            row("/admin clear <room>",     "Wipe all messages in a room"),
+            row("/admin delete <room>",    "Permanently delete a room"),
+            row("/admin deleteall",        "Delete ALL rooms (needs confirmation)"),
+            sep(),
+        ]
+    else:
+        lines += [
+            "",
+            f"  {TIME_COLOR}  Tip: type /admin to unlock admin commands{RESET}",
+        ]
+
+    lines.append("")
+    print("\n".join(lines))
 
 
 def admin_mode():
