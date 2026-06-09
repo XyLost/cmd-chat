@@ -73,7 +73,7 @@ async function checkRateLimit(env, ip) {
   }
 
   await env.CHAT.put(key, JSON.stringify(data), {
-    expirationTtl: Math.ceil(CONFIG.RATE_LIMIT_WINDOW_MS / 1000) + 5,
+    expirationTtl: 60, // Cloudflare KV minimum is 60s
   });
 
   return data.count > CONFIG.RATE_LIMIT_MAX_MSGS;

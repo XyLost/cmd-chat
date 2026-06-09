@@ -18,7 +18,7 @@ import sys
 import getpass
 
 # ── Config ────────────────────────────────────────────────────────
-WORKER_URL = "https://stan-of-her.im-inferno7mm.workers.dev"
+WORKER_URL = "https://your-worker-name.your-subdomain.workers.dev"
 POLL_INTERVAL = 3
 MAX_MSG_LEN = 500
 
